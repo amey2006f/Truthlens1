@@ -7,7 +7,7 @@ import { Badge } from './ui/badge';
 import { Separator } from './ui/separator';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { toast } from 'sonner@2.0.3';
-import { AnalysisResult } from '../lib/types-and-constants';
+import type { AnalysisResult } from '../lib/types-and-constants';
 import { generateCSVData, generateJSONData, downloadFile, generateExportFilename } from '../lib/utils-and-mock';
 
 interface ExportDialogProps {

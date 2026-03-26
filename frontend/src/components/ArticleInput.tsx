@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Badge } from './ui/badge';
 import { Alert, AlertDescription } from './ui/alert';
-import { AnalysisInput } from '../lib/types-and-constants';
+import type { AnalysisInput } from '../lib/types-and-constants';
 import { validateAnalysisInput, isValidUrl } from '../lib/utils-and-mock';
 
 interface ArticleInputProps {

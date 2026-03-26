@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner@2.0.3';
-import { AnalysisResult, AnalysisInput, AIConfig, APP_CONFIG, ANALYSIS_STEPS } from './types-and-constants';
+import type { AnalysisResult, AnalysisInput, AIConfig } from './types-and-constants';
+import { APP_CONFIG, ANALYSIS_STEPS } from './types-and-constants';
 import { AIAnalysisService, AIConfigManager } from './ai-services';
 
 // ==================== LOCALSTORAGE HOOK ====================

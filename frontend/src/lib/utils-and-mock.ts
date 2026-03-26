@@ -1,4 +1,5 @@
-import { AnalysisResult, AnalysisInput, ANALYSIS_STEPS, MOCK_TITLES, MOCK_FINDINGS } from './types-and-constants';
+import type { AnalysisResult, AnalysisInput } from './types-and-constants';
+import { ANALYSIS_STEPS, MOCK_TITLES, MOCK_FINDINGS } from './types-and-constants';
 
 // ==================== UTILITY FUNCTIONS ====================
 export const sleep = (ms: number): Promise<void> => 

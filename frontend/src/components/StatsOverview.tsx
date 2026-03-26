@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { TrendingUp, TrendingDown, Shield, AlertTriangle, BarChart3, Users } from 'lucide-react';
-import { AnalysisResult } from '../App';
+import type { AnalysisResult } from '../lib/types-and-constants';
 
 interface StatsOverviewProps {
   totalAnalyses: number;

@@ -3,6 +3,8 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import OpenAI from 'openai';
+import axios from 'axios';
+import * as cheerio from 'cheerio';
 
 dotenv.config();
 
@@ -12,9 +14,17 @@ const port = process.env.PORT || 5001;
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
-const openaiApiKey = process.env.OPENAI_API_KEY;
-const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
-const geminiApiKey = process.env.GEMINI_API_KEY;
+/** Trim and strip accidental wrapping quotes from .env values */
+const trimEnv = (value) => {
+  if (value == null || value === '') return '';
+  return String(value)
+    .trim()
+    .replace(/^["']|["']$/g, '');
+};
+
+const openaiApiKey = trimEnv(process.env.OPENAI_API_KEY);
+const anthropicApiKey = trimEnv(process.env.ANTHROPIC_API_KEY);
+const geminiApiKey = trimEnv(process.env.GEMINI_API_KEY);
 
 if (!openaiApiKey) {
   console.warn(
@@ -43,6 +53,90 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: 'truthlens-backend' });
 });
 
+// Endpoint to fetch and extract article content from URLs
+app.post('/api/fetch-article', async (req, res) => {
+  try {
+    const { url } = req.body;
+
+    if (!url) {
+      return res.status(400).json({ error: 'URL is required' });
+    }
+
+    // Validate URL format
+    try {
+      new URL(url);
+    } catch {
+      return res.status(400).json({ error: 'Invalid URL format' });
+    }
+
+    // Fetch the article content
+    const response = await axios.get(url, {
+      timeout: 10000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      },
+      maxRedirects: 5
+    });
+
+    const html = response.data;
+    const $ = cheerio.load(html);
+
+    // Extract main content - try multiple selectors
+    let content = '';
+    
+    // Try to find article content using common selectors
+    const selectors = [
+      'article',
+      '[role="main"]',
+      '.article-body',
+      '.post-content',
+      '.entry-content',
+      '.content',
+      'main',
+      '#content',
+      '.main-content'
+    ];
+
+    for (const selector of selectors) {
+      const element = $(selector).first();
+      if (element.length) {
+        content = element.text().trim();
+        break;
+      }
+    }
+
+    // If no content found, try body text
+    if (!content) {
+      content = $('body').text().trim();
+    }
+
+    // Extract title
+    let title = $('h1').first().text().trim() || $('title').text().trim() || 'No title found';
+
+    // Clean up excessive whitespace
+    content = content.replace(/\s+/g, ' ').trim();
+
+    // Limit content length to avoid overwhelming the AI
+    const maxLength = 5000;
+    if (content.length > maxLength) {
+      content = content.substring(0, maxLength) + '...';
+    }
+
+    return res.json({
+      success: true,
+      url,
+      title,
+      content: content || 'Could not extract article content'
+    });
+  } catch (error) {
+    console.error('Error fetching article:', error);
+    return res.status(500).json({
+      error: 'Failed to fetch article content',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
 // Generic AI analysis endpoint
 app.post('/api/analyze', async (req, res) => {
   try {
@@ -58,65 +152,82 @@ app.post('/api/analyze', async (req, res) => {
       switch (taskType) {
         case 'bias':
           return (
-            'You are an AI that analyzes news article bias. ' +
-            'Respond with a single JSON object with fields: ' +
-            'bias_score (number -100 to 100), ' +
+            'You are an advanced Fake News Detection AI analyzing political bias in news articles. ' +
+            'STRICT REQUIREMENTS: Respond ONLY with valid JSON, no additional text. ' +
+            'Analyze these bias signals: emotional/manipulative language, one-sided sources, selective facts, loaded terminology, ' +
+            'lack of opposing viewpoints, sensational framing, cherry-picked data. ' +
+            'Respond with JSON having: ' +
+            'bias_score (number -100 to 100: negative=left bias, positive=right bias, 0=center), ' +
             'source_reliability (number 0-100), ' +
-            'political_leaning ("left" | "right" | "center"), ' +
-            'bias_indicators (array of objects with fields: ' +
-            'type ("selection" | "framing" | "confirmation" | "attribution" | "omission"), ' +
-            'description (string), severity ("low" | "medium" | "high"), ' +
-            'confidence (number 0-1), examples (array of strings)). ' +
-            'No extra text, only JSON.'
+            'political_leaning ("left" | "right" | "center" | "unknown"), ' +
+            'bias_indicators (array with: type, description, severity, confidence, examples), ' +
+            'key_findings (array of strings describing main bias signals), ' +
+            'confidence (number 0-1). Only JSON, no markdown.'
           );
         case 'fact':
           return (
-            'You are an AI that analyzes factual accuracy of news articles. ' +
-            'Respond with a single JSON object with fields: ' +
-            'factual_accuracy (number 0-100), ' +
-            'source_attribution (number 0-100), ' +
-            'results (array of objects with fields: ' +
-            'claim (string), status ("true" | "false" | "mixed" | "unverified"), ' +
-            'confidence (number 0-1), sources (array of strings), explanation (string)). ' +
-            'No extra text, only JSON.'
+            'You are an advanced Fake News Detection AI analyzing factual accuracy. ' +
+            'STRICT REQUIREMENTS: Respond ONLY with valid JSON, no additional text. ' +
+            'Evaluate: presence of verifiable facts, supporting evidence, reliable sources, ' +
+            'unsubstantiated claims, conspiracy language, misleading statistics, false attributions. ' +
+            'Respond with JSON having: ' +
+            'factual_accuracy (0-100), ' +
+            'fake_probability (0-100: likelihood article contains misinformation), ' +
+            'fake_signals (array: lack of sources, sensational headlines, conspiracy language, misleading claims), ' +
+            'results (array of analyzed claims with: claim text, status, confidence, sources, explanation), ' +
+            'key_findings (array of strings), ' +
+            'confidence (0-1). Only JSON, no markdown.'
           );
         case 'sentiment':
           return (
-            'You are an AI that analyzes sentiment of news articles. ' +
-            'Respond with a single JSON object with fields: ' +
-            'sentiment ("positive" | "neutral" | "negative"), ' +
-            'confidence (number 0-1), emotional_intensity (number 0-100). ' +
-            'No extra text, only JSON.'
+            'You are an advanced Fake News Detection AI analyzing article sentiment. ' +
+            'STRICT REQUIREMENTS: Respond ONLY with valid JSON, no additional text. ' +
+            'Analyze emotional tone, loaded language intensity, sensationalism level. ' +
+            'Respond with JSON having: ' +
+            'sentiment ("positive" | "neutral" | "negative" | "mixed"), ' +
+            'confidence (0-1), ' +
+            'emotional_intensity (0-100), ' +
+            'sensationalism_level (0-100: high=clickbait/emotional), ' +
+            'emotional_triggers (array of detected emotional manipulation techniques). Only JSON, no markdown.'
           );
         case 'linguistic':
           return (
-            'You are an AI that analyzes linguistic features of news articles. ' +
-            'Respond with a single JSON object with fields: ' +
-            'readability_score (number 0-100), emotional_intensity (number 0-100), ' +
-            'subjectivity_score (number 0-100), certainty_level (number 0-100), ' +
-            'complexity_score (number 0-100), sensationalism_score (number 0-100), ' +
-            'polarizing_language (number 0-100). ' +
-            'No extra text, only JSON.'
+            'You are an advanced Fake News Detection AI analyzing linguistic features for misinformation signals. ' +
+            'STRICT REQUIREMENTS: Respond ONLY with valid JSON, no additional text. ' +
+            'Analyze: readability, emotional language, subjectivity, certainty claims, complexity, ' +
+            'sensationalism, polarizing language, absolute claims ("always", "never"), vague sources ("they say"). ' +
+            'Respond with JSON having: ' +
+            'readability_score (0-100), emotional_intensity (0-100), subjectivity_score (0-100), ' +
+            'certainty_level (0-100), complexity_score (0-100), sensationalism_score (0-100), ' +
+            'polarizing_language (0-100), misinformation_signals (array of detected red flags), ' +
+            'confidence (0-1). Only JSON, no markdown.'
           );
         case 'claims':
           return (
-            'You are an AI that extracts verifiable claims from news articles. ' +
-            'Respond with a single JSON object with field "claims" which is an array of objects ' +
-            'with fields: id (string), text (string), confidence (number 0-1), ' +
-            'category ("factual" | "opinion" | "statistical" | "prediction"), ' +
+            'You are an advanced Fake News Detection AI extracting verifiable claims. ' +
+            'STRICT REQUIREMENTS: Respond ONLY with valid JSON, no additional text. ' +
+            'Extract ONLY testable claims, ignore general statements and opinions. ' +
+            'For each claim identify: text, category, verifiability, current fact-check status. ' +
+            'Respond with JSON field "claims" (array): ' +
+            'id, text, category ("factual" | "opinion" | "statistical" | "prediction"), ' +
             'verifiability ("verifiable" | "unverifiable" | "subjective"), ' +
-            'factCheckStatus ("verified" | "disputed" | "false" | "unverified"), ' +
-            'sources (array of strings). No extra text, only JSON.'
+            'factCheckStatus ("verified_true" | "verified_false" | "disputed" | "unverified"), ' +
+            'confidence (0-1), potential_sources (array). Only JSON, no markdown.'
           );
-        case 'source':
+        case 'comprehensive':
           return (
-            'You are an AI that analyzes the reliability of news sources. ' +
-            'Use both the article content and the URL/domain (if provided). ' +
-            'Respond with a single JSON object with fields: ' +
-            'domain (string), domainAuthority (number 0-100), ' +
-            'historicalReliability (number 0-100), expertiseRelevance (number 0-100), ' +
-            'transparencyScore (number 0-100), editorialStandards (number 0-100). ' +
-            'No extra text, only JSON.'
+            'You are an advanced Fake News Detection AI. Provide COMPREHENSIVE analysis. ' +
+            'STRICT REQUIREMENTS: Respond ONLY with valid JSON, no additional text. ' +
+            'Analyze credibility, bias, and fake news signals. ' +
+            'Respond with JSON: ' +
+            'credibility_score (0-100: based on factual accuracy + source reliability - bias impact), ' +
+            'bias_score (-100 to 100), bias_type ("left" | "right" | "center" | "unknown"), ' +
+            'sentiment ("positive" | "neutral" | "negative" | "mixed"), ' +
+            'fake_probability (0-100), ' +
+            'key_reasons (array of 3-5 main findings explaining the scores), ' +
+            'quality_signals (object: has_sources, has_dates, has_author, structured_reporting), ' +
+            'red_flags (array of detected misinformation indicators), ' +
+            'confidence (0-1). Only JSON, no markdown.'
           );
         default:
           return null;
@@ -130,9 +241,14 @@ app.post('/api/analyze', async (req, res) => {
     }
 
     const resolveProviderAndModel = (key) => {
-      // If a global override is set, always use OpenAI with that model.
-      if (process.env.OPENAI_MODEL) {
-        return { provider: 'openai', model: process.env.OPENAI_MODEL };
+      // Optional: force OpenAI model for GPT-style keys only (never override Gemini/Claude).
+      const openaiOverride = trimEnv(process.env.OPENAI_MODEL);
+      if (
+        openaiOverride &&
+        key !== 'gemini-2.5-flash' &&
+        key !== 'claude-3-sonnet'
+      ) {
+        return { provider: 'openai', model: openaiOverride };
       }
 
       switch (key) {
@@ -143,12 +259,12 @@ app.post('/api/analyze', async (req, res) => {
         case 'claude-3-sonnet':
           return {
             provider: 'anthropic',
-            model: process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-latest'
+            model: trimEnv(process.env.ANTHROPIC_MODEL) || 'claude-3-5-sonnet-latest'
           };
-        case 'gemini-pro':
+        case 'gemini-2.5-flash':
           return {
             provider: 'gemini',
-            model: process.env.GEMINI_MODEL || 'gemini-1.5-pro'
+            model: trimEnv(process.env.GEMINI_MODEL) || 'gemini-2.5-flash'
           };
         default:
           return { provider: 'openai', model: 'gpt-4.1-mini' };
@@ -222,24 +338,48 @@ app.post('/api/analyze', async (req, res) => {
         data.content?.[0]?.content ||
         JSON.stringify(data);
     } else if (provider === 'gemini') {
-  if (!genAI) {
-    return res.status(500).json({
-      error: 'GEMINI_API_KEY is not configured on the backend.'
-    });
-  }
+      if (!genAI) {
+        return res.status(500).json({
+          error: 'GEMINI_API_KEY is not configured on the backend.'
+        });
+      }
 
-  const geminiModel = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash"
+      const geminiModelId = model.replace(/^models\//, '');
+      const geminiModel = genAI.getGenerativeModel({ model: geminiModelId });
+      const promptText = `${systemMessage}\n\n${userContent}`;
 
-  });
+      // Retry logic for handling temporary failures (e.g., 503 Service Unavailable)
+      let result;
+      let lastError;
+      const maxRetries = 3;
+      const baseDelay = 1000; // 1 second
 
-  const result = await geminiModel.generateContent(
-    `${systemMessage}\n\n${userContent}`
-  );
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          result = await geminiModel.generateContent(promptText);
+          lastError = null;
+          break; // Success, exit retry loop
+        } catch (err) {
+          lastError = err;
+          // Check if it's a retryable error (503, 429, timeout)
+          const isRetryable = err.status === 503 || err.status === 429 || err.code === 'ETIMEDOUT';
+          if (isRetryable && attempt < maxRetries - 1) {
+            const delay = baseDelay * Math.pow(2, attempt); // Exponential backoff
+            console.log(`Gemini API error (attempt ${attempt + 1}/${maxRetries}):`, err.status || err.code, `- Retrying in ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          } else {
+            throw err;
+          }
+        }
+      }
 
-  const response = await result.response;
-  raw = response.text();
-} else {
+      if (lastError) {
+        throw lastError;
+      }
+
+      const geminiResponse = result.response;
+      raw = geminiResponse.text();
+    } else {
       return res.status(400).json({
         error: `Unsupported provider: ${provider}`
       });
@@ -263,8 +403,10 @@ app.post('/api/analyze', async (req, res) => {
     });
   } catch (err) {
     console.error('Error in /api/analyze:', err);
+    const message = err instanceof Error ? err.message : String(err);
     return res.status(500).json({
-      error: 'AI analysis failed on backend'
+      error: 'AI analysis failed on backend',
+      details: message
     });
   }
 });

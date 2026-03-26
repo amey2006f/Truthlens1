@@ -16,27 +16,25 @@ export class AIAnalysisService {
       // Extract and preprocess content
       const content = await this.preprocessContent(input);
       
-      // Run parallel AI analyses
-      const [
-        biasAnalysis,
-        factualAnalysis,
-        sentimentAnalysis,
-        linguisticAnalysis,
-        claimsExtraction
-      ] = await Promise.all([
-        this.analyzeBias(content),
-        this.analyzeFactuality(content),
-        this.analyzeSentiment(content),
-        this.analyzeLinguisticFeatures(content),
-        this.extractClaims(content)
-      ]);
+      // Check if we have minimal content for analysis
+      if (content.length < 100) {
+        throw new Error('Insufficient article content for accurate analysis');
+      }
 
-      // Calculate overall scores
-      const credibilityScore = this.calculateCredibilityScore({
-        biasAnalysis,
-        factualAnalysis,
-        linguisticAnalysis
-      });
+      // Run COMPREHENSIVE AI analysis (single call instead of multiple)
+      const comprehensiveAnalysis = await this.callAIModel(
+        'Perform comprehensive fake news detection analysis on this article.',
+        content,
+        'comprehensive',
+        input.url
+      );
+
+      // Extract all metrics from comprehensive response
+      const credibilityScore = comprehensiveAnalysis.credibility_score ?? 50;
+      const fakeNewsScore = 100 - credibilityScore;
+      const biasScore = comprehensiveAnalysis.bias_score ?? 0;
+      const sentiment = comprehensiveAnalysis.sentiment ?? 'neutral';
+      const fakeProbability = comprehensiveAnalysis.fake_probability ?? 0;
 
       const processingTime = Date.now() - startTime;
 
@@ -44,40 +42,60 @@ export class AIAnalysisService {
         id: Date.now().toString(),
         url: input.url || '',
         title: await this.extractTitle(content),
-        content: content.substring(0, 1000) + '...',
+        content: content.substring(0, 500) + '...',
         timestamp: new Date(),
-        fakeNewsScore: 100 - credibilityScore,
-        biasScore: biasAnalysis.overallBias,
-        biasDirection: this.determineBiasDirection(biasAnalysis.overallBias),
+        fakeNewsScore: Math.round(fakeProbability),
+        biasScore: biasScore,
+        biasDirection: this.determineBiasDirection(biasScore),
         credibilityFactors: {
-          sourceReliability: biasAnalysis.sourceReliability,
-          factualAccuracy: factualAnalysis.accuracy,
-          emotionalLanguage: linguisticAnalysis.emotionalIntensity,
-          sourceAttribution: factualAnalysis.sourceAttribution
+          sourceReliability: comprehensiveAnalysis.quality_signals?.has_sources ? 75 : 50,
+          factualAccuracy: credibilityScore,
+          emotionalLanguage: comprehensiveAnalysis.red_flags?.length > 2 ? 70 : 30,
+          sourceAttribution: comprehensiveAnalysis.quality_signals?.has_author ? 80 : 40
         },
-        keyFindings: this.generateKeyFindings({
-          biasAnalysis,
-          factualAnalysis,
-          linguisticAnalysis
-        }),
-        sentiment: sentimentAnalysis.sentiment,
-        aiConfidence: this.calculateConfidence({
-          biasAnalysis,
-          factualAnalysis,
-          linguisticAnalysis
-        }),
+        keyFindings: comprehensiveAnalysis.key_reasons || [
+          'Analysis completed',
+          'Review assessment carefully',
+          'Cross-reference with official sources'
+        ],
+        sentiment: sentiment,
+        aiConfidence: comprehensiveAnalysis.confidence ?? 0.7,
         modelUsed: this.config.selectedModel,
         processingTime,
-        detectedClaims: claimsExtraction,
-        linguisticFeatures: linguisticAnalysis,
-        sourceAnalysis: await this.analyzeSource(input.url),
-        factCheckResults: factualAnalysis.results,
-        biasIndicators: biasAnalysis.indicators
+        detectedClaims: comprehensiveAnalysis.verified_claims || [],
+        linguisticFeatures: {
+          readabilityScore: comprehensiveAnalysis.readability_score ?? 65,
+          emotionalIntensity: comprehensiveAnalysis.emotional_intensity ?? 40,
+          subjectivityScore: comprehensiveAnalysis.subjectivity_score ?? 50,
+          certaintyLevel: comprehensiveAnalysis.certainty_level ?? 70,
+          complexityScore: comprehensiveAnalysis.complexity_score ?? 55,
+          sensationalismScore: comprehensiveAnalysis.sensationalism_score ?? 35,
+          polarizingLanguage: comprehensiveAnalysis.polarizing_language ?? 30
+        },
+        sourceAnalysis: {
+          domain: input.url ? new URL(input.url).hostname : 'unknown',
+          domainAuthority: comprehensiveAnalysis.domain_authority ?? 65,
+          historicalReliability: comprehensiveAnalysis.source_reliability ?? 70,
+          expertiseRelevance: 65,
+          transparencyScore: comprehensiveAnalysis.quality_signals?.has_author ? 75 : 50,
+          editorialStandards: 65
+        },
+        factCheckResults: comprehensiveAnalysis.claims || [],
+        biasIndicators: comprehensiveAnalysis.red_flags || []
       };
     } catch (error) {
       console.error('AI Analysis failed:', error);
       throw new Error('AI analysis failed. Please check your API configuration.');
     }
+  }
+
+  private getDefaultBiasAnalysis() {
+    return {
+      overallBias: 0,
+      sourceReliability: 70,
+      indicators: [] as BiasIndicator[],
+      confidence: 0.5
+    };
   }
 
   private async preprocessContent(input: AnalysisInput): Promise<string> {
@@ -94,20 +112,38 @@ export class AIAnalysisService {
     throw new Error('No content provided for analysis');
   }
 
-  private simulateContentExtraction(url: string): string {
-    // Simulate realistic article content based on URL
-    const domain = new URL(url).hostname;
-    return `Article content from ${domain}. This is a simulated extraction of article content that would typically be obtained through web scraping or API integration. The content includes the main body text, headlines, and relevant metadata needed for comprehensive analysis.`;
+  private async simulateContentExtraction(url: string): Promise<string> {
+    try {
+      // Fetch real article content from the URL
+      const response = await fetch('/api/fetch-article', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ url })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch article: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      return data.content || data.text || 'No content extracted from URL';
+    } catch (error) {
+      console.error('Error fetching article content from URL:', error);
+      // Fallback: return error message so AI can process
+      return `Unable to fetch article content from ${url}. Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+    }
   }
 
   private async callAIModel(
     prompt: string,
     content: string,
-    task: 'bias' | 'fact' | 'sentiment' | 'linguistic' | 'claims' | 'source',
+    task: 'bias' | 'fact' | 'sentiment' | 'linguistic' | 'claims' | 'source' | 'comprehensive',
     url?: string
   ): Promise<any> {
     const backendUrl =
-      (globalThis as any).VITE_BACKEND_URL || 'http://localhost:5000';
+      import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
     const response = await fetch(`${backendUrl}/api/analyze`, {
       method: 'POST',
       headers: {
@@ -125,7 +161,13 @@ export class AIAnalysisService {
     if (!response.ok) {
       const errorBody = await response.json().catch(() => ({}));
       console.error('Backend AI error:', errorBody);
-      throw new Error(errorBody.error || 'AI backend request failed');
+      const detail =
+        typeof (errorBody as { details?: string }).details === 'string'
+          ? (errorBody as { details: string }).details
+          : '';
+      const message =
+        (errorBody as { error?: string }).error || 'AI backend request failed';
+      throw new Error(detail ? `${message}: ${detail}` : message);
     }
 
     const json = await response.json();
@@ -145,12 +187,41 @@ export class AIAnalysisService {
       content,
       'bias'
     );
-    
+
+    // Some model outputs may omit `bias_score` and only provide `political_leaning`.
+    // Fallback keeps the UI consistent even with partial model responses.
+    const rawBiasScore = (response as { bias_score?: unknown }).bias_score;
+    const politicalLeaning = (response as { political_leaning?: unknown }).political_leaning;
+
+    let overallBias: number;
+    if (typeof rawBiasScore === 'number' && Number.isFinite(rawBiasScore)) {
+      overallBias = rawBiasScore;
+    } else {
+      switch (politicalLeaning) {
+        case 'left':
+          overallBias = -50;
+          break;
+        case 'right':
+          overallBias = 50;
+          break;
+        case 'center':
+        default:
+          overallBias = 0;
+          break;
+      }
+    }
+
     return {
-      overallBias: response.bias_score,
-      sourceReliability: response.source_reliability,
-      indicators: response.bias_indicators as BiasIndicator[],
-      confidence: response.confidence
+      overallBias,
+      sourceReliability:
+        typeof response.source_reliability === 'number' && Number.isFinite(response.source_reliability)
+          ? response.source_reliability
+          : 70,
+      indicators: (response.bias_indicators || []) as BiasIndicator[],
+      confidence:
+        typeof response.confidence === 'number' && Number.isFinite(response.confidence)
+          ? response.confidence
+          : 0.6
     };
   }
 
@@ -162,21 +233,24 @@ export class AIAnalysisService {
     );
     
     return {
-      accuracy: response.factual_accuracy,
-      sourceAttribution: response.source_attribution,
-      results: response.results as FactCheckResult[],
-      confidence: response.confidence
+      accuracy: typeof response.factual_accuracy === 'number' ? response.factual_accuracy : 75,
+      sourceAttribution: typeof response.source_attribution === 'number' ? response.source_attribution : 70,
+      results: (response.results ?? []) as FactCheckResult[],
+      confidence: typeof response.confidence === 'number' ? response.confidence : 0.7
     };
   }
 
   private async analyzeSentiment(content: string) {
+    const response = await this.callAIModel(
+      FACT_CHECK_PROMPTS.claims,
+      content,
+      'sentiment'
+    );
+    
     return {
-      // Reuse FACT_CHECK_PROMPTS.claims as a generic analysis prompt base
-      ...(await this.callAIModel(
-        FACT_CHECK_PROMPTS.claims,
-        content,
-        'sentiment'
-      )),
+      sentiment: response.sentiment ?? 'neutral',
+      confidence: typeof response.confidence === 'number' ? response.confidence : 0.7,
+      emotional_intensity: typeof response.emotional_intensity === 'number' ? response.emotional_intensity : 40
     };
   }
 
@@ -188,13 +262,13 @@ export class AIAnalysisService {
     );
 
     return {
-      readabilityScore: response.readability_score,
-      emotionalIntensity: response.emotional_intensity,
-      subjectivityScore: response.subjectivity_score,
-      certaintyLevel: response.certainty_level,
-      complexityScore: response.complexity_score,
-      sensationalismScore: response.sensationalism_score,
-      polarizingLanguage: response.polarizing_language
+      readabilityScore: typeof response.readability_score === 'number' ? response.readability_score : 65,
+      emotionalIntensity: typeof response.emotional_intensity === 'number' ? response.emotional_intensity : 40,
+      subjectivityScore: typeof response.subjectivity_score === 'number' ? response.subjectivity_score : 50,
+      certaintyLevel: typeof response.certainty_level === 'number' ? response.certainty_level : 70,
+      complexityScore: typeof response.complexity_score === 'number' ? response.complexity_score : 55,
+      sensationalismScore: typeof response.sensationalism_score === 'number' ? response.sensationalism_score : 35,
+      polarizingLanguage: typeof response.polarizing_language === 'number' ? response.polarizing_language : 30
     } as LinguisticFeatures;
   }
 
@@ -220,12 +294,12 @@ export class AIAnalysisService {
     );
 
     return {
-      domain: response.domain,
-      domainAuthority: response.domainAuthority,
-      historicalReliability: response.historicalReliability,
-      expertiseRelevance: response.expertiseRelevance,
-      transparencyScore: response.transparencyScore,
-      editorialStandards: response.editorialStandards
+      domain: response.domain ?? 'unknown',
+      domainAuthority: typeof response.domainAuthority === 'number' ? response.domainAuthority : 65,
+      historicalReliability: typeof response.historicalReliability === 'number' ? response.historicalReliability : 65,
+      expertiseRelevance: typeof response.expertiseRelevance === 'number' ? response.expertiseRelevance : 60,
+      transparencyScore: typeof response.transparencyScore === 'number' ? response.transparencyScore : 60,
+      editorialStandards: typeof response.editorialStandards === 'number' ? response.editorialStandards : 65
     };
   }
 
@@ -235,14 +309,28 @@ export class AIAnalysisService {
     return lines[0]?.substring(0, 100) || 'Article Analysis';
   }
 
-  private calculateCredibilityScore(analyses: any): number {
+  private calculateCredibilityScore(analyses: any, biasEnabled: boolean): number {
     const { biasAnalysis, factualAnalysis, linguisticAnalysis } = analyses;
     
     const biasComponent = Math.max(0, 100 - Math.abs(biasAnalysis.overallBias));
-    const factualComponent = factualAnalysis.accuracy;
-    const linguisticComponent = Math.max(0, 100 - linguisticAnalysis.sensationalismScore);
-    
-    return (biasComponent * 0.3 + factualComponent * 0.5 + linguisticComponent * 0.2);
+    const factualComponent = factualAnalysis.accuracy ?? 50;
+    const linguisticComponent = Math.max(0, 100 - (linguisticAnalysis.sensationalismScore ?? 50));
+
+    const biasWeight = biasEnabled ? 0.3 : 0;
+    const factualWeight = 0.5;
+    const linguisticWeight = 0.2;
+    const totalWeight = biasWeight + factualWeight + linguisticWeight;
+
+    // Normalize weights to always sum to 1.0, preventing division issues
+    const normalizedBiasWeight = totalWeight > 0 ? biasWeight / totalWeight : 0;
+    const normalizedFactualWeight = totalWeight > 0 ? factualWeight / totalWeight : 0;
+    const normalizedLinguisticWeight = totalWeight > 0 ? linguisticWeight / totalWeight : 0;
+
+    return Math.round(
+      biasComponent * normalizedBiasWeight +
+      factualComponent * normalizedFactualWeight +
+      linguisticComponent * normalizedLinguisticWeight
+    );
   }
 
   private calculateConfidence(analyses: any): number {
@@ -316,7 +404,7 @@ export class AIConfigManager {
 
   private static getDefaultConfig(): AIConfig {
     return {
-      selectedModel: 'gpt-3.5-turbo',
+      selectedModel: 'gemini-2.5-flash',
       analysisDepth: 'standard',
       enableFactChecking: true,
       enableBiasDetection: true,

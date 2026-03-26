@@ -116,8 +116,8 @@ export const AI_MODELS = {
     speed: 'medium',
     accuracy: 'high'
   },
-  'gemini-pro': {
-    name: 'Gemini Pro',
+  'gemini-2.5-flash': {
+    name: 'gemini-2.5-flash',
     provider: 'Google',
     strengths: ['Fact Checking', 'Multi-modal'],
     speed: 'fast',

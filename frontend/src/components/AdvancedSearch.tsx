@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Slider } from './ui/slider';
-import { AnalysisResult } from './App';
+import type { AnalysisResult } from '../lib/types-and-constants';
 
 interface AdvancedSearchProps {
   analyses: AnalysisResult[];

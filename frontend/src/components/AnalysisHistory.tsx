@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { AdvancedSearch } from './AdvancedSearch';
-import { AnalysisResult } from '../App';
+import type { AnalysisResult } from '../lib/types-and-constants';
 
 interface AnalysisHistoryProps {
   analyses: AnalysisResult[];

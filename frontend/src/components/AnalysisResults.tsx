@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Progress } from './ui/progress';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
-import { AnalysisResult } from '../App';
+import type { AnalysisResult } from '../lib/types-and-constants';
 
 interface AnalysisResultsProps {
   analysis: AnalysisResult;
